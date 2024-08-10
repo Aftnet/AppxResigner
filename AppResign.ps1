@@ -60,6 +60,7 @@ function SignPackage {
     param ([Parameter(Mandatory = $true)][System.IO.FileInfo]$path)
 
     $signArgs = @("sign", "/fd", "SHA256")
+    $signArgs += @("/tr", "http://timestamp.sectigo.com", "/td", "SHA256")
     if ($IntermediateCertificatePath) {
         $signArgs += @("/ac", "$IntermediateCertificatePath")
     }
