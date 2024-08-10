@@ -1,7 +1,7 @@
 param (
     [Parameter(Mandatory = $true)][System.IO.FileInfo]$PackagePath,
-    [Parameter][System.IO.FileInfo]$CertificatePath,
-    [Parameter][string]$CertificatePassword
+    [Parameter(Mandatory = $false)][System.IO.FileInfo]$CertificatePath,
+    [Parameter(Mandatory = $false)][string]$CertificatePassword
 )
 
 function GetWinSdkDir {
@@ -36,7 +36,9 @@ function GetSigningCertificate {
             $certPw = ConvertTo-SecureString -String $CertificatePassword -Force -AsPlainText
             $cert = Get-PfxData -FilePath $CertificatePath.FullName -Password $certPw
         }
-        $cert = Get-PfxData -FilePath $CertificatePath.FullName
+        else {
+            $cert = Get-PfxData -FilePath $CertificatePath.FullName
+        }
         $cert = $cert.EndEntityCertificates[0]
     }
     else {
