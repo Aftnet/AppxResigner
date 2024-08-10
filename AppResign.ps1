@@ -1,5 +1,7 @@
 param (
-    [Parameter(Mandatory = $true)][System.IO.FileInfo]$PackagePath
+    [Parameter(Mandatory = $true)][System.IO.FileInfo]$PackagePath,
+    [Parameter][System.IO.FileInfo]$CertificatePath,
+    [Parameter][string]$CertificatePassword
 )
 
 function GetWinSdkDir {
@@ -28,13 +30,24 @@ function RemoveMetadata {
 }
 
 function GetSigningCertificate {
-    $codeSigningSubject = "CN=AppPinning Code Sign"
-    $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -eq $codeSigningSubject }
-    if ($cert.count -eq 0) {
-        $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject $codeSigningSubject -KeyExportPolicy Exportable -CertStoreLocation Cert:\CurrentUser\My\ -NotAfter (Get-Date).AddYears(100)
+    $cert = $null
+    if ($CertificatePath) {
+        if ($CertificatePassword) {
+            $certPw = ConvertTo-SecureString -String $CertificatePassword -Force -AsPlainText
+            $cert = Get-PfxData -FilePath $CertificatePath.FullName -Password $certPw
+        }
+        $cert = Get-PfxData -FilePath $CertificatePath.FullName
+        $cert = $cert.EndEntityCertificates[0]
     }
     else {
-        $cert = $cert[0]
+        $codeSigningSubject = "CN=AppPinning Code Sign"
+        $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -eq $codeSigningSubject }
+        if ($cert.count -eq 0) {
+            $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject $codeSigningSubject -KeyExportPolicy Exportable -CertStoreLocation Cert:\CurrentUser\My\ -NotAfter (Get-Date).AddYears(100)
+        }
+        else {
+            $cert = $cert[0]
+        }
     }
 
     return $cert
