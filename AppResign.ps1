@@ -1,7 +1,8 @@
 param (
     [Parameter(Mandatory = $true)][System.IO.FileInfo]$PackagePath,
     [Parameter(Mandatory = $false)][System.IO.FileInfo]$CertificatePath,
-    [Parameter(Mandatory = $false)][string]$CertificatePassword
+    [Parameter(Mandatory = $false)][string]$CertificatePassword,
+    [Parameter(Mandatory = $false)][System.IO.FileInfo]$IntermediateCertificatePath
 )
 
 function GetWinSdkDir {
@@ -58,7 +59,25 @@ function GetSigningCertificate {
 function SignPackage {
     param ([Parameter(Mandatory = $true)][System.IO.FileInfo]$path)
 
-    &$signToolBin.FullName sign /fd SHA256 /a $path
+    $signArgs = @("sign", "/fd", "SHA256")
+    if ($IntermediateCertificatePath) {
+        $signArgs += @("/ac", "$IntermediateCertificatePath")
+    }
+
+    if ($CertificatePath) {
+        if ($CertificatePassword) {
+            $signArgs += @("/f", "$CertificatePath", "/p", "$CertificatePassword")
+        }
+        else {
+            $signArgs += @("/f", "$CertificatePath")
+        }
+    }
+    else {
+        $signArgs += $signArgs += @("/a")
+    }
+
+    $signArgs += @("$path")
+    &$signToolBin.FullName $signArgs
 }
 
 if (-not(Test-Path $PackagePath)) {
