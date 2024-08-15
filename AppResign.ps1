@@ -1,8 +1,8 @@
 param (
-    [Parameter(Mandatory = $true)][System.IO.FileInfo]$PackagePath,
-    [Parameter(Mandatory = $false)][System.IO.FileInfo]$CertificatePath,
+    [Parameter(Mandatory = $true)][System.IO.FileInfo]$Package,
+    [Parameter(Mandatory = $false)][System.IO.FileInfo]$Certificate,
     [Parameter(Mandatory = $false)][string]$CertificatePassword,
-    [Parameter(Mandatory = $false)][System.IO.FileInfo]$IntermediateCertificatePath
+    [Parameter(Mandatory = $false)][System.IO.FileInfo]$IntermediateCertificate
 )
 
 function GetWinSdkDir {
@@ -14,31 +14,30 @@ function GetWinSdkDir {
 }
 
 function CreateEmptyDir {
-    param ([Parameter(Mandatory = $true)][System.IO.DirectoryInfo]$path)
+    param ([Parameter(Mandatory = $true)][System.IO.DirectoryInfo]$Path)
 
-    if (Test-Path $path ) {
-        Remove-Item -Path $path -Recurse -Force
+    if (Test-Path $Path ) {
+        Remove-Item -Path $Path -Recurse -Force
     }
-    return New-Item -Path $path -ItemType Directory
+    return New-Item -Path $Path -ItemType Directory
 }
 
 function RemoveMetadata {
-    param ([Parameter(Mandatory = $true)][System.IO.DirectoryInfo]$path)
+    param ([Parameter(Mandatory = $true)][System.IO.DirectoryInfo]$Path)
 
-    Remove-Item -Path "$path\AppxMetadata" -Recurse -Force
-    Remove-Item -Path "$path\AppxBlockMap.xml"
-    Remove-Item -Path "$path\AppxSignature.p7x"
+    Remove-Item -Path "$Path\AppxMetadata" -Recurse -Force
+    Remove-Item -Path "$Path\AppxBlockMap.xml"
+    Remove-Item -Path "$Path\AppxSignature.p7x"
 }
 
 function GetSigningCertificate {
     $cert = $null
-    if ($CertificatePath) {
+    if ($Certificate) {
         if ($CertificatePassword) {
-            $certPw = ConvertTo-SecureString -String $CertificatePassword -Force -AsPlainText
-            $cert = Get-PfxData -FilePath $CertificatePath.FullName -Password $certPw
+            $cert = Get-PfxData -FilePath $Certificate.FullName -Password (ConvertTo-SecureString -String $CertificatePassword -Force -AsPlainText)
         }
         else {
-            $cert = Get-PfxData -FilePath $CertificatePath.FullName
+            $cert = Get-PfxData -FilePath $Certificate.FullName
         }
         $cert = $cert.EndEntityCertificates[0]
     }
@@ -57,54 +56,39 @@ function GetSigningCertificate {
 }
 
 function SignPackage {
-    param ([Parameter(Mandatory = $true)][System.IO.FileInfo]$path)
+    param ([Parameter(Mandatory = $true)][System.IO.FileInfo]$Path)
 
     $signArgs = @("sign", "/fd", "SHA256")
     $signArgs += @("/tr", "http://timestamp.sectigo.com", "/td", "SHA256")
-    if ($IntermediateCertificatePath) {
-        $signArgs += @("/ac", "$IntermediateCertificatePath")
+    if ($IntermediateCertificate) {
+        $signArgs += @("/ac", "$IntermediateCertificate")
     }
 
-    if ($CertificatePath) {
+    if ($Certificate) {
         if ($CertificatePassword) {
-            $signArgs += @("/f", "$CertificatePath", "/p", "$CertificatePassword")
+            $signArgs += @("/f", "$Certificate", "/p", "$CertificatePassword")
         }
         else {
-            $signArgs += @("/f", "$CertificatePath")
+            $signArgs += @("/f", "$Certificate")
         }
     }
     else {
         $signArgs += $signArgs += @("/a")
     }
 
-    $signArgs += @("$path")
+    $signArgs += @("$Path")
     &$signToolBin.FullName $signArgs
 }
 
-if (-not(Test-Path $PackagePath)) {
-    throw "$($PackagePath.FullName) not found"
-}
+function ResignAppx {
+    param ([Parameter(Mandatory = $true)][System.IO.FileInfo]$InputPackage,
+        [Parameter(Mandatory = $true)][System.IO.FileInfo]$OutputPackage,
+        [Parameter(Mandatory = $true)][System.IO.DirectoryInfo]$WorkDir
+    )
 
-$winSDKDir = GetWinSdkDir
-$makeAppxBin = Get-Item -Path "$winSDKDir\makeappx.exe"
-$signToolBin = Get-Item -Path "$winSDKDir\signtool.exe"
-
-$signCert = GetSigningCertificate
-
-$inputBundle = Get-Item -Path $PackagePath.FullName
-$outputBundlePath = $inputBundle.FullName -replace "\.([^.]+)", "_resigned.`$1"
-
-$tempDir = CreateEmptyDir("$(Split-Path -Parent $PSCommandPath)\Temp")
-$originalPkgsDir = CreateEmptyDir("$tempDir\OriginalPkgs")
-$modifiedPkgsDir = CreateEmptyDir("$tempDir\ModifiedPkgs")
-
-&$makeAppxBin.FullName unbundle /p $inputBundle.FullName /d $originalPkgsDir.FullName
-RemoveMetadata($originalPkgsDir.FullName)
-
-foreach ($i in (Get-ChildItem -Path "$originalPkgsDir\*.appx")) {
-    $dir = CreateEmptyDir("$tempDir\PkgContent")
-    &$makeAppxBin.FullName unpack /p $i.FullName /d $dir.FullName
-    RemoveMetadata($dir)
+    $dir = CreateEmptyDir "$WorkDir\appx"
+    &$makeAppxBin.FullName unpack /p $InputPackage.FullName /d $dir.FullName
+    RemoveMetadata $dir
 
     $manifestFile = Get-Item -Path "$dir\AppxManifest.xml"
 
@@ -112,16 +96,55 @@ foreach ($i in (Get-ChildItem -Path "$originalPkgsDir\*.appx")) {
     $packagePublisherElement.Node.Value = $signCert.Subject
     $packagePublisherElement.Node.OwnerDocument.Save($manifestFile.FullName)
 
-    &$makeAppxBin.FullName pack /d $dir.FullName /p "$modifiedPkgsDir\$($i.Name)"
-
-    $pkg = Get-Item -Path "$modifiedPkgsDir\$($i.Name)"
-    SignPackage($pkg.FullName)
+    &$makeAppxBin.FullName pack /d $dir.FullName /p $OutputPackage.FullName
+    SignPackage $OutputPackage.FullName
 
     Remove-Item -Path $dir.FullName -Recurse -Force
 }
 
-&$makeAppxBin.FullName bundle /o /d $modifiedPkgsDir.FullName /p $outputBundlePath
-$outputBundle = Get-Item -Path $outputBundlePath
-SignPackage($outputBundle.FullName)
+function ResignAppxBundle {
+    param ([Parameter(Mandatory = $true)][System.IO.FileInfo]$InputPackage,
+        [Parameter(Mandatory = $true)][System.IO.FileInfo]$OutputPackage,
+        [Parameter(Mandatory = $true)][System.IO.DirectoryInfo]$WorkDir
+    )
+
+    $originalPkgsDir = CreateEmptyDir "$WorkDir\appxbundle_original"
+    $modifiedPkgsDir = CreateEmptyDir "$WorkDir\appxbundle_resigned"
+
+    &$makeAppxBin.FullName unbundle /p $InputPackage.FullName /d $originalPkgsDir.FullName
+    RemoveMetadata $originalPkgsDir.FullName
+
+    foreach ($i in (Get-ChildItem -Path "$originalPkgsDir\*.appx")) {
+        ResignAppx $i ([System.IO.FileInfo]("$modifiedPkgsDir\$($i.Name)")) $WorkDir
+    }
+
+    &$makeAppxBin.FullName bundle /o /d $modifiedPkgsDir.FullName /p $OutputPackage.FullName
+    SignPackage $OutputPackage.FullName
+
+    Remove-Item -Path $originalPkgsDir.FullName -Recurse -Force
+    Remove-Item -Path $modifiedPkgsDir.FullName -Recurse -Force
+}
+
+if (-not($Package.Exists)) {
+    throw "$($Package.FullName) not found"
+}
+
+$winSDKDir = GetWinSdkDir
+$makeAppxBin = Get-Item -Path "$winSDKDir\makeappx.exe"
+$signToolBin = Get-Item -Path "$winSDKDir\signtool.exe"
+
+$signCert = GetSigningCertificate
+$tempDir = CreateEmptyDir "$(Split-Path -Parent $PSCommandPath)\_appxresigner_workdir"
+$outPackage = [System.IO.FileInfo]($Package.FullName -replace "\.([^.]+)", "_resigned.`$1")
+
+if ($Package.Extension -eq ".appx") {
+    ResignAppx $Package $outPackage $tempDir
+}
+elseif ($Package.Extension -eq ".appxbundle") {
+    ResignAppxBundle  $Package $outPackage $tempDir
+}
+else {
+    throw "$($Package.FullName) unsupported"
+}
 
 Remove-Item -Path $tempDir.FullName -Recurse -Force

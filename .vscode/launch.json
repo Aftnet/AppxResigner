@@ -10,8 +10,8 @@
             "request": "launch",
             "script": "${file}",
             "args": [
-                "-PackagePath D:\\Downloads\\windows-mail-and-calendar-16005-14326-20970.appxbundle",
-                "-CertificatePath D:\\Downloads\\SignCert.pfx",
+                "-Package D:\\Downloads\\windows-mail-and-calendar-16005-14326-20970.appxbundle",
+                "-Certificate D:\\Downloads\\SignCert.pfx",
                 "-CertificatePassword certpw"
             ]
         }
